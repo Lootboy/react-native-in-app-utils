@@ -7,13 +7,13 @@
 @implementation InAppUtils
 {
     NSArray *products;
-    NSMutableDictionary *_callbacks;
+    NSMutableDictionary *_promiseBlocks;
 }
 
 - (instancetype)init
 {
     if ((self = [super init])) {
-        _callbacks = [[NSMutableDictionary alloc] init];
+        _promiseBlocks = [[NSMutableDictionary alloc] init];
         [[SKPaymentQueue defaultQueue] addTransactionObserver:self];
     }
     return self;
@@ -37,25 +37,25 @@ RCT_EXPORT_MODULE()
         switch (transaction.transactionState) {
             case SKPaymentTransactionStateFailed: {
                 NSString *key = RCTKeyForInstance(transaction.payment.productIdentifier);
-                RCTResponseSenderBlock callback = _callbacks[key];
-                if (callback) {
-                    callback(@[RCTJSErrorFromNSError(transaction.error)]);
-                    [_callbacks removeObjectForKey:key];
+                NSDictionary promiseBlock = _promiseBlocks[key];
+                if (promiseBlock) {
+                    promiseBlock[@"reject"](@[RCTJSErrorFromNSError(transaction.error)]);
+                    [_promiseBlocks removeObjectForKey:key];
                 } else {
-                    RCTLogWarn(@"No callback registered for transaction with state failed.");
+                    RCTLogWarn(@"No resolver registered for transaction with state failed.");
                 }
                 [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
                 break;
             }
             case SKPaymentTransactionStatePurchased: {
                 NSString *key = RCTKeyForInstance(transaction.payment.productIdentifier);
-                RCTResponseSenderBlock callback = _callbacks[key];
-                if (callback) {
+                NSDictionary promiseBlock = _promiseBlocks[key];
+                if (promiseBlock) {
                     NSDictionary *purchase = [self getPurchaseData:transaction];
-                    callback(@[[NSNull null], purchase]);
-                    [_callbacks removeObjectForKey:key];
+                    promiseBlock[@"resolve"](purchase);
+                    [_promiseBlocks removeObjectForKey:key];
                 } else {
-                    RCTLogWarn(@"No callback registered for transaction with state purchased.");
+                    RCTLogWarn(@"No resolver registered for transaction with state purchased.");
                 }
                 break;
             }
@@ -74,7 +74,8 @@ RCT_EXPORT_MODULE()
     }
 }
 
-RCT_EXPORT_METHOD(getPendingPurchases:(RCTResponseSenderBlock)callback)
+RCT_EXPORT_METHOD(getPendingPurchases:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
     NSMutableArray *transactionsArrayForJS = [NSMutableArray array];
     for (SKPaymentTransaction *transaction in [SKPaymentQueue defaultQueue].transactions) {
@@ -102,25 +103,28 @@ RCT_EXPORT_METHOD(getPendingPurchases:(RCTResponseSenderBlock)callback)
 
         [transactionsArrayForJS addObject:purchase];
     }
-    callback(@[[NSNull null], transactionsArrayForJS]);
+    resolve(transactionsArrayForJS);
 }
 
 RCT_EXPORT_METHOD(purchaseProductForUser:(NSString *)productIdentifier
                   username:(NSString *)username
-                  callback:(RCTResponseSenderBlock)callback)
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
-    [self doPurchaseProduct:productIdentifier username:username callback:callback];
+    [self doPurchaseProduct:productIdentifier username:username resolver:resolve rejecter:reject];
 }
 
 RCT_EXPORT_METHOD(purchaseProduct:(NSString *)productIdentifier
-                  callback:(RCTResponseSenderBlock)callback)
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
-    [self doPurchaseProduct:productIdentifier username:nil callback:callback];
+    [self doPurchaseProduct:productIdentifier username:nil resolver:resolve rejecter:reject];
 }
 
 - (void) doPurchaseProduct:(NSString *)productIdentifier
                   username:(NSString *)username
-                  callback:(RCTResponseSenderBlock)callback
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject
 {
     SKProduct *product;
     for(SKProduct *p in products)
@@ -137,27 +141,32 @@ RCT_EXPORT_METHOD(purchaseProduct:(NSString *)productIdentifier
             payment.applicationUsername = username;
         }
         [[SKPaymentQueue defaultQueue] addPayment:payment];
-        _callbacks[RCTKeyForInstance(payment.productIdentifier)] = callback;
+        _promiseBlocks[RCTKeyForInstance(payment.productIdentifier)] = @{
+                                                                         @"resolve": resolve,
+                                                                         @"reject": reject,
+                                                                         };
+        };
     } else {
-        callback(@[@"invalid_product"]);
+        reject(RCTMakeError(@"invalid_product", nil, nil));
     }
 }
 
 RCT_EXPORT_METHOD(finishPurchase:(NSString *)transactionIdentifier
-                  callback:(RCTResponseSenderBlock)callback)
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
     for (SKPaymentTransaction *transaction in [SKPaymentQueue defaultQueue].transactions) {
         if ([transaction.transactionIdentifier isEqualToString:transactionIdentifier]) {
             if (transaction.transactionState == SKPaymentTransactionStatePurchased) {
                 [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
-                callback(@[[NSNull null]]);
+                resolve([NSNull null]);
             } else {
-                callback(@[@"invalid_purchase"]);
+                reject(RCTMakeError(@"invalid_purchase", nil, nil));
             }
             return;
         }
     }
-    callback(@[@"invalid_purchase"]);
+    reject(RCTMakeError(@"invalid_purchase", nil, nil));
 }
 
 
@@ -165,29 +174,29 @@ RCT_EXPORT_METHOD(finishPurchase:(NSString *)transactionIdentifier
 restoreCompletedTransactionsFailedWithError:(NSError *)error
 {
     NSString *key = RCTKeyForInstance(@"restoreRequest");
-    RCTResponseSenderBlock callback = _callbacks[key];
-    if (callback) {
+    NSDictionary promiseBlock = _promiseBlocks[key];
+    if (promiseBlock) {
         switch (error.code)
         {
             case SKErrorPaymentCancelled:
-                callback(@[@"user_cancelled"]);
+                promiseBlock[@"reject"](RCTMakeError(@"user_cancelled", nil, nil));
                 break;
             default:
-                callback(@[@"restore_failed"]);
+                promiseBlock[@"reject"](RCTMakeError(@"restore_failed", nil, nil));
                 break;
         }
 
-        [_callbacks removeObjectForKey:key];
+        [_promiseBlocks removeObjectForKey:key];
     } else {
-        RCTLogWarn(@"No callback registered for restore product request.");
+        RCTLogWarn(@"No resolver registered for restore product request.");
     }
 }
 
 - (void)paymentQueueRestoreCompletedTransactionsFinished:(SKPaymentQueue *)queue
 {
     NSString *key = RCTKeyForInstance(@"restoreRequest");
-    RCTResponseSenderBlock callback = _callbacks[key];
-    if (callback) {
+    NSDictionary promiseBlock = _promiseBlocks[key];
+    if (promiseBlock) {
         NSMutableArray *productsArrayForJS = [NSMutableArray array];
         for(SKPaymentTransaction *transaction in queue.transactions){
             if(transaction.transactionState == SKPaymentTransactionStateRestored) {
@@ -198,56 +207,71 @@ restoreCompletedTransactionsFailedWithError:(NSError *)error
                 [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
             }
         }
-        callback(@[[NSNull null], productsArrayForJS]);
-        [_callbacks removeObjectForKey:key];
+        promiseBlock[@"resolve"](productsArrayForJS);
+        [_promiseBlocks removeObjectForKey:key];
     } else {
-        RCTLogWarn(@"No callback registered for restore product request.");
+        RCTLogWarn(@"No resolver registered for restore product request.");
     }
 }
 
-RCT_EXPORT_METHOD(restorePurchases:(RCTResponseSenderBlock)callback)
+RCT_EXPORT_METHOD(restorePurchases:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
     NSString *restoreRequest = @"restoreRequest";
-    _callbacks[RCTKeyForInstance(restoreRequest)] = callback;
+    _promiseBlocks[RCTKeyForInstance(restoreRequest)] = @{
+                                                          @"resolve": resolve,
+                                                          @"reject": reject,
+                                                          };
     [[SKPaymentQueue defaultQueue] restoreCompletedTransactions];
 }
 
 RCT_EXPORT_METHOD(restorePurchasesForUser:(NSString *)username
-                    callback:(RCTResponseSenderBlock)callback)
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
     NSString *restoreRequest = @"restoreRequest";
-    _callbacks[RCTKeyForInstance(restoreRequest)] = callback;
     if(!username) {
-        callback(@[@"username_required"]);
+        reject(RCTMakeError(@"username_required", nil, nil));
         return;
     }
+    _promiseBlocks[RCTKeyForInstance(restoreRequest)] = @{
+                                                          @"resolve": resolve,
+                                                          @"reject": reject,
+                                                          };
+
     [[SKPaymentQueue defaultQueue] restoreCompletedTransactionsWithApplicationUsername:username];
 }
 
 RCT_EXPORT_METHOD(loadProducts:(NSArray *)productIdentifiers
-                  callback:(RCTResponseSenderBlock)callback)
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
     SKProductsRequest *productsRequest = [[SKProductsRequest alloc]
                                           initWithProductIdentifiers:[NSSet setWithArray:productIdentifiers]];
     productsRequest.delegate = self;
-    _callbacks[RCTKeyForInstance(productsRequest)] = callback;
+    _promiseBlocks[RCTKeyForInstance(productsRequest)] = @{
+                                                           @"resolve": resolve,
+                                                           @"reject": reject,
+                                                           };;
     [productsRequest start];
 }
 
-RCT_EXPORT_METHOD(canMakePayments: (RCTResponseSenderBlock)callback)
+RCT_EXPORT_METHOD(canMakePayments:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
     BOOL canMakePayments = [SKPaymentQueue canMakePayments];
-    callback(@[@(canMakePayments)]);
+    resolve(canMakePayments);
 }
 
-RCT_EXPORT_METHOD(receiptData:(RCTResponseSenderBlock)callback)
+RCT_EXPORT_METHOD(receiptData:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
     NSURL *receiptUrl = [[NSBundle mainBundle] appStoreReceiptURL];
     NSData *receiptData = [NSData dataWithContentsOfURL:receiptUrl];
     if (!receiptData) {
-      callback(@[@"not_available"]);
+      reject(RCTMakeError(@"not_available", nil, nil));
     } else {
-      callback(@[[NSNull null], [receiptData base64EncodedStringWithOptions:0]]);
+      resolve([receiptData base64EncodedStringWithOptions:0]);
     }
 }
 
@@ -256,8 +280,8 @@ RCT_EXPORT_METHOD(receiptData:(RCTResponseSenderBlock)callback)
      didReceiveResponse:(SKProductsResponse *)response
 {
     NSString *key = RCTKeyForInstance(request);
-    RCTResponseSenderBlock callback = _callbacks[key];
-    if (callback) {
+    NSDictionary promiseBlock = _promiseBlocks[key];
+    if (promiseBlock) {
         products = [NSMutableArray arrayWithArray:response.products];
         NSMutableArray *productsArrayForJS = [NSMutableArray array];
         for(SKProduct *item in response.products) {
@@ -274,20 +298,20 @@ RCT_EXPORT_METHOD(receiptData:(RCTResponseSenderBlock)callback)
                                       };
             [productsArrayForJS addObject:product];
         }
-        callback(@[[NSNull null], productsArrayForJS]);
-        [_callbacks removeObjectForKey:key];
+        promiseBlock[@"resolve"](productsArrayForJS);
+        [_promiseBlocks removeObjectForKey:key];
     } else {
-        RCTLogWarn(@"No callback registered for load product request.");
+        RCTLogWarn(@"No resolver registered for load product request.");
     }
 }
 
 // SKProductsRequestDelegate network error
 - (void)request:(SKRequest *)request didFailWithError:(NSError *)error{
     NSString *key = RCTKeyForInstance(request);
-    RCTResponseSenderBlock callback = _callbacks[key];
-    if(callback) {
-        callback(@[RCTJSErrorFromNSError(error)]);
-        [_callbacks removeObjectForKey:key];
+    NSDictionary promiseBlock = _promiseBlocks[key];
+    if(promiseBlock) {
+        promiseBlock[@"reject"](@[RCTJSErrorFromNSError(error)]);
+        [_promiseBlocks removeObjectForKey:key];
     }
 }
 
