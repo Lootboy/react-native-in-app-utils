@@ -146,12 +146,13 @@ RCT_EXPORT_METHOD(purchaseProduct:(NSString *)productIdentifier
         if(username) {
             payment.applicationUsername = username;
         }
-        [[SKPaymentQueue defaultQueue] addPayment:payment];
         _promiseBlocks[RCTKeyForInstance(payment.productIdentifier)] = @{
                                                                          @"resolve": resolve,
                                                                          @"reject": reject,
                                                                          };
+        [[SKPaymentQueue defaultQueue] addPayment:payment];
     } else {
+
         reject(@"invalid_product", nil, nil);
     }
 }
