@@ -85,29 +85,7 @@ RCT_EXPORT_METHOD(getPendingPurchases:(RCTPromiseResolveBlock)resolve
 {
     NSMutableArray *transactionsArrayForJS = [NSMutableArray array];
     for (SKPaymentTransaction *transaction in [SKPaymentQueue defaultQueue].transactions) {
-
-        NSMutableDictionary *purchase = [NSMutableDictionary new];
-        purchase[@"transactionDate"] = @(transaction.transactionDate.timeIntervalSince1970 * 1000);
-        purchase[@"productIdentifier"] = transaction.payment.productIdentifier;
-        purchase[@"transactionState"] = StringForTransactionState(transaction.transactionState);
-
-        if (transaction.transactionIdentifier != nil) {
-                purchase[@"transactionIdentifier"] = transaction.transactionIdentifier;
-        }
-
-        NSString *receipt = [[transaction transactionReceipt] base64EncodedStringWithOptions:0];
-
-        if (receipt != nil) {
-            purchase[@"transactionReceipt"] = receipt;
-        }
-
-        SKPaymentTransaction *originalTransaction = transaction.originalTransaction;
-        if (originalTransaction) {
-            purchase[@"originalTransactionDate"] = @(originalTransaction.transactionDate.timeIntervalSince1970 * 1000);
-            purchase[@"originalTransactionIdentifier"] = originalTransaction.transactionIdentifier;
-        }
-
-        [transactionsArrayForJS addObject:purchase];
+        [transactionsArrayForJS addObject:[self getQueuedPurchaseData:transaction]];
     }
     resolve(transactionsArrayForJS);
 }
@@ -141,6 +119,21 @@ RCT_EXPORT_METHOD(purchaseProduct:(NSString *)productIdentifier
         }
     }
 
+    for (SKPaymentTransaction *transaction in [SKPaymentQueue defaultQueue].transactions) {
+        if ([productIdentifier isEqualToString:transaction.payment.productIdentifier]) {
+            switch (transaction.transactionState) {
+                case SKPaymentTransactionStateFailed:
+                    [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
+                    break;
+                case SKPaymentTransactionStatePurchased:
+                    resolve([self getQueuedPurchaseData:transaction]);
+                    return;
+                default:
+                    RCTLogInfo(@"Transaction not failed nor purchased");
+            }
+        }
+    }
+
     if(product) {
         SKMutablePayment *payment = [SKMutablePayment paymentWithProduct:product];
         if(username) {
@@ -152,7 +145,6 @@ RCT_EXPORT_METHOD(purchaseProduct:(NSString *)productIdentifier
                                                                          };
         [[SKPaymentQueue defaultQueue] addPayment:payment];
     } else {
-
         reject(@"invalid_product", nil, nil);
     }
 }
@@ -164,7 +156,6 @@ RCT_EXPORT_METHOD(finishPurchase:(NSString *)transactionIdentifier
     for (SKPaymentTransaction *transaction in [SKPaymentQueue defaultQueue].transactions) {
         if ([transaction.transactionIdentifier isEqualToString:transactionIdentifier]) {
             if (transaction.transactionState == SKPaymentTransactionStatePurchased) {
-                [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
                 resolve([NSNull null]);
             } else {
                 reject(@"invalid_purchase", nil, nil);
@@ -345,6 +336,32 @@ RCT_EXPORT_METHOD(receiptData:(RCTPromiseResolveBlock)resolve
         purchase[@"originalTransactionDate"] = @(originalTransaction.transactionDate.timeIntervalSince1970 * 1000);
         purchase[@"originalTransactionIdentifier"] = originalTransaction.transactionIdentifier;
     }
+
+    return purchase;
+}
+
+
+- (NSDictionary *)getQueuedPurchaseData:(SKPaymentTransaction *)transaction {
+    NSMutableDictionary *purchase = [NSMutableDictionary new];
+        purchase[@"transactionDate"] = @(transaction.transactionDate.timeIntervalSince1970 * 1000);
+        purchase[@"productIdentifier"] = transaction.payment.productIdentifier;
+        purchase[@"transactionState"] = StringForTransactionState(transaction.transactionState);
+
+        if (transaction.transactionIdentifier != nil) {
+                purchase[@"transactionIdentifier"] = transaction.transactionIdentifier;
+        }
+
+        NSString *receipt = [[transaction transactionReceipt] base64EncodedStringWithOptions:0];
+
+        if (receipt != nil) {
+            purchase[@"transactionReceipt"] = receipt;
+        }
+
+        SKPaymentTransaction *originalTransaction = transaction.originalTransaction;
+        if (originalTransaction) {
+            purchase[@"originalTransactionDate"] = @(originalTransaction.transactionDate.timeIntervalSince1970 * 1000);
+            purchase[@"originalTransactionIdentifier"] = originalTransaction.transactionIdentifier;
+        }
 
     return purchase;
 }
