@@ -156,6 +156,7 @@ RCT_EXPORT_METHOD(finishPurchase:(NSString *)transactionIdentifier
     for (SKPaymentTransaction *transaction in [SKPaymentQueue defaultQueue].transactions) {
         if ([transaction.transactionIdentifier isEqualToString:transactionIdentifier]) {
             if (transaction.transactionState == SKPaymentTransactionStatePurchased) {
+                [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
                 resolve([NSNull null]);
             } else {
                 reject(@"invalid_purchase", nil, nil);
