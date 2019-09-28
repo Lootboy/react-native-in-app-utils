@@ -3,6 +3,7 @@
 #import <React/RCTLog.h>
 #import <React/RCTUtils.h>
 #import "SKProduct+StringPrice.h"
+#import "SKProductDiscount+StringPrice.h"
 
 @implementation InAppUtils
 {
@@ -290,6 +291,7 @@ RCT_EXPORT_METHOD(receiptData:(RCTPromiseResolveBlock)resolve
             products = [NSMutableArray arrayWithArray:response.products];
             NSMutableArray *productsArrayForJS = [NSMutableArray array];
             for(SKProduct *item in response.products) {
+                NSDictionary *introductoryPrice = [InAppUtils parseIntroductoryPrice: item];
                 NSDictionary *product = @{
                                           @"identifier": item.productIdentifier,
                                           @"price": item.price,
@@ -300,6 +302,7 @@ RCT_EXPORT_METHOD(receiptData:(RCTPromiseResolveBlock)resolve
                                           @"downloadable": item.downloadable ? @"true" : @"false" ,
                                           @"description": item.localizedDescription ? item.localizedDescription : @"",
                                           @"title": item.localizedTitle ? item.localizedTitle : @"",
+                                          @"introductoryPrice": (introductoryPrice == nil) ? [NSNull null] : introductoryPrice,
                                           };
                 [productsArrayForJS addObject:product];
             }
@@ -372,13 +375,77 @@ RCT_EXPORT_METHOD(receiptData:(RCTPromiseResolveBlock)resolve
     [[SKPaymentQueue defaultQueue] removeTransactionObserver:self];
 }
 
+#pragma mark Static
+
++ (NSDictionary *)parseIntroductoryPrice: (SKProduct *)product {
+    if(@available(iOS 11.2, *)) {
+        if (product != nil && product.introductoryPrice != nil) {
+            // paymentMode: Returning as string for ease of use and code resilience
+            NSString *paymentMode;
+            switch (product.introductoryPrice.paymentMode) {
+                case SKProductDiscountPaymentModeFreeTrial:
+                    paymentMode = @"freeTrial";
+                    break;
+                case SKProductDiscountPaymentModePayAsYouGo:
+                    paymentMode = @"payAsYouGo";
+                    break;
+                case SKProductDiscountPaymentModePayUpFront:
+                    paymentMode = @"payUpFront";
+                    break;
+                default:
+                    paymentMode = @"unavailable";
+                    break;
+            }
+
+            // subscriptionPeriod: Returning as Dictionary { unit: NSString, numberOfUnits: NSNumber }
+            NSString *subscriptionPeriodUnit;
+            switch (product.introductoryPrice.subscriptionPeriod.unit) {
+                case SKProductPeriodUnitDay:
+                    subscriptionPeriodUnit = @"day";
+                    break;
+                case SKProductPeriodUnitWeek:
+                    subscriptionPeriodUnit = @"week";
+                    break;
+                case SKProductPeriodUnitMonth:
+                    subscriptionPeriodUnit = @"month";
+                    break;
+                case SKProductPeriodUnitYear:
+                    subscriptionPeriodUnit = @"year";
+                    break;
+                default:
+                    subscriptionPeriodUnit = @"unavailable";
+                    break;
+            }
+
+            NSDictionary *subscriptionPeriod = @{
+                                                 @"unit": subscriptionPeriodUnit,
+                                                 @"numberOfUnits": [[NSNumber alloc] initWithLong:product.introductoryPrice.subscriptionPeriod.numberOfUnits],
+                                                 };
+
+            NSDictionary *introductoryPrice = @{
+                                                @"price": product.introductoryPrice.price,
+                                                @"currencySymbol": [product.introductoryPrice.priceLocale objectForKey:NSLocaleCurrencySymbol],
+                                                @"currencyCode": [product.introductoryPrice.priceLocale objectForKey:NSLocaleCurrencyCode],
+                                                @"countryCode": [product.introductoryPrice.priceLocale objectForKey: NSLocaleCountryCode],
+                                                @"priceString": product.introductoryPrice.priceString,
+                                                @"numberOfPeriods": [[NSNumber alloc] initWithLong:product.introductoryPrice.numberOfPeriods],
+                                                @"paymentMode": paymentMode,
+                                                @"subscriptionPeriod": subscriptionPeriod,
+                                                };
+            return introductoryPrice;
+        }
+    }
+
+    return nil;
+}
+
 #pragma mark Private
 
 static NSString *RCTKeyForInstance(id instance)
 {
     return [NSString stringWithFormat:@"%p", instance];
 }
-    
+
 static NSString *StringForTransactionState(SKPaymentTransactionState state)
 {
     switch(state) {
@@ -388,7 +455,7 @@ static NSString *StringForTransactionState(SKPaymentTransactionState state)
         case SKPaymentTransactionStateRestored: return @"restored";
         case SKPaymentTransactionStateDeferred: return @"deferred";
     }
-    
+
     [NSException raise:NSGenericException format:@"Unexpected SKPaymentTransactionState."];
 }
 
