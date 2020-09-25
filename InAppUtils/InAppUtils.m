@@ -29,7 +29,7 @@
     return dispatch_get_main_queue();
 }
 
-RCT_EXPORT_MODULE()
+RCT_EXPORT_MODULE();
 
 - (void)paymentQueue:(SKPaymentQueue *)queue
  updatedTransactions:(NSArray *)transactions
@@ -37,7 +37,7 @@ RCT_EXPORT_MODULE()
     for (SKPaymentTransaction *transaction in transactions) {
         switch (transaction.transactionState) {
             case SKPaymentTransactionStateFailed: {
-                NSString *key = RCTKeyForInstance(transaction.payment.productIdentifier);
+                NSString *key = transaction.payment.productIdentifier;
                 NSDictionary *promiseBlock = _promiseBlocks[key];
                 if (promiseBlock) {
                     RCTPromiseRejectBlock reject = promiseBlock[@"reject"];
@@ -52,7 +52,7 @@ RCT_EXPORT_MODULE()
                 break;
             }
             case SKPaymentTransactionStatePurchased: {
-                NSString *key = RCTKeyForInstance(transaction.payment.productIdentifier);
+                NSString *key = transaction.payment.productIdentifier;
                 NSDictionary *promiseBlock = _promiseBlocks[key];
                 if (promiseBlock) {
                     NSDictionary *purchase = [self getPurchaseData:transaction];
@@ -140,7 +140,7 @@ RCT_EXPORT_METHOD(purchaseProduct:(NSString *)productIdentifier
         if(username) {
             payment.applicationUsername = username;
         }
-        _promiseBlocks[RCTKeyForInstance(payment.productIdentifier)] = @{
+        _promiseBlocks[payment.productIdentifier] = @{
                                                                          @"resolve": resolve,
                                                                          @"reject": reject,
                                                                          };
@@ -172,7 +172,7 @@ RCT_EXPORT_METHOD(finishPurchase:(NSString *)transactionIdentifier
 - (void)paymentQueue:(SKPaymentQueue *)queue
 restoreCompletedTransactionsFailedWithError:(NSError *)error
 {
-    NSString *key = RCTKeyForInstance(@"restoreRequest");
+    NSString *key = @"restoreRequest";
     NSDictionary *promiseBlock = _promiseBlocks[key];
     if (promiseBlock) {
         RCTPromiseRejectBlock reject = promiseBlock[@"reject"];
@@ -195,7 +195,7 @@ restoreCompletedTransactionsFailedWithError:(NSError *)error
 
 - (void)paymentQueueRestoreCompletedTransactionsFinished:(SKPaymentQueue *)queue
 {
-    NSString *key = RCTKeyForInstance(@"restoreRequest");
+    NSString *key = @"restoreRequest";
     NSDictionary *promiseBlock = _promiseBlocks[key];
     if (promiseBlock) {
         RCTPromiseResolveBlock resolve = promiseBlock[@"resolve"];
@@ -222,7 +222,7 @@ RCT_EXPORT_METHOD(restorePurchases:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
     NSString *restoreRequest = @"restoreRequest";
-    _promiseBlocks[RCTKeyForInstance(restoreRequest)] = @{
+    _promiseBlocks[restoreRequest] = @{
                                                           @"resolve": resolve,
                                                           @"reject": reject,
                                                           };
@@ -238,7 +238,7 @@ RCT_EXPORT_METHOD(restorePurchasesForUser:(NSString *)username
         reject(@"username_required", nil, nil);
         return;
     }
-    _promiseBlocks[RCTKeyForInstance(restoreRequest)] = @{
+    _promiseBlocks[restoreRequest] = @{
                                                           @"resolve": resolve,
                                                           @"reject": reject,
                                                           };
