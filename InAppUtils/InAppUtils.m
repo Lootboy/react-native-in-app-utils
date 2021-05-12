@@ -42,7 +42,7 @@ RCT_EXPORT_MODULE();
                 if (promiseBlock) {
                     RCTPromiseRejectBlock reject = promiseBlock[@"reject"];
                     if (reject) {
-                        reject(@"payment_failed", nil, transaction.error);
+                        reject([NSString stringWithFormat:@"ESKERRORDOMAIN%ld",(long) transaction.error.code], nil, transaction.error);
                     }
                     [_promiseBlocks removeObjectForKey:key];
                 } else {
